@@ -6,8 +6,9 @@ import zipfile
 from datetime import datetime
 from io import BytesIO
 from tkinter import Image
-from typing import Dict, Union
+from typing import Dict, Union, List, Any
 import pandas as pd
+from pandas import DataFrame
 from fastapi import HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import Integer, String, Float, DateTime, VARCHAR, BOOLEAN, TEXT, DATE, TIME, DECIMAL, SMALLINT, \
@@ -16,7 +17,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from AI_Agent.agent import BedrockClient
 from common_utilty.utility import ImageProcessor
 from config import settings
-
+import json
+from typing import Dict
 
 class ColumnRelation(BaseModel):
     data_type: str
@@ -233,29 +235,136 @@ def process_invoice_data(result):
 
 
 
-def process_images_in_background(folder_location: str, prompt: str):
-    processor = ImageProcessor(
-        folder_paths=[folder_location],
-        prompt_template=prompt,
-        max_workers=5
-    )
-    results_df = processor.process_images()
-    # results_df.to_csv("processed_results.csv", index=False)
-    if results_df.empty:
-        print("No images processed.")
-        return
-    print("Processed results:")
-
-    print("Cleaning...")
-    # if os.listdir(folder_location):  # If the folder is empty
-    #     try:
-    #         shutil.rmtree(folder_location)  # Remove the folder
-    #         print(f"Deleted empty folder: {folder_location}")
-    #     except Exception as e:
-    #         print(f"Error deleting folder {folder_location}: {e}")
-
+def process_extracted_fields(results: List[Dict[str, Any]]) -> DataFrame:
+    """Process extracted fields and convert to DataFrame with flattened structure"""
+    flattened_data = []
+    
+    for result in results:
+        try:
+            # Parse the JSON result if it's a string
+            data = result if isinstance(result, dict) else json.loads(result)
+            
+            # Create a flat dictionary for each document - removed specified fields
+            flat_dict = {
+                'document_type': data.get('metadata', {}).get('document_type'),
+                'invoice_number': data.get('invoice_details', {}).get('invoice_number'),
+                'invoice_date': data.get('invoice_details', {}).get('invoice_date'),
+                'due_date': data.get('invoice_details', {}).get('due_date'),
+                'subtotal': data.get('amounts', {}).get('subtotal'),
+                'tax': data.get('amounts', {}).get('tax'),
+                'discount': data.get('amounts', {}).get('discount'),
+                'shipping': data.get('amounts', {}).get('shipping'),
+                'total': data.get('amounts', {}).get('total'),
+                'company_name': data.get('company', {}).get('name'),
+                'street': data.get('company', {}).get('address', {}).get('street'),
+                'city': data.get('company', {}).get('address', {}).get('city'),
+                'state': data.get('company', {}).get('address', {}).get('state'),
+                'postal_code': data.get('company', {}).get('address', {}).get('postal_code'),
+                'country': data.get('company', {}).get('address', {}).get('country'),
+                'phone': data.get('company', {}).get('contact', {}).get('phone'),
+                'email': data.get('company', {}).get('contact', {}).get('email'),
+                'website': data.get('company', {}).get('contact', {}).get('website'),
+                'tax_id': data.get('company', {}).get('tax_id'),
+                'notes': data.get('notes'),
+                'payment_method': data.get('payment_info', {}).get('payment_method')
+            }
+            
+            # Handle line items separately
+            line_items = data.get('line_items', [])
+            if line_items:
+                for item in line_items:
+                    item_dict = flat_dict.copy()
+                    item_dict.update({
+                        'item': item.get('item'),
+                        'description': item.get('description'),
+                        'quantity': item.get('quantity'),
+                        'unit_price': item.get('unit_price'),
+                        'line_total': item.get('total')
+                    })
+                    flattened_data.append(item_dict)
+            else:
+                flattened_data.append(flat_dict)
+                
+        except Exception as e:
+            print(f"Error processing result: {e}")
+            continue
+    
+    # Create DataFrame
+    df = pd.DataFrame(flattened_data)
+    
+    # Save to CSV with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = f"extracted_data_{timestamp}.csv"
+    df.to_csv(csv_filename, index=False)
+    print(f"Data saved to {csv_filename}")
+    
     return df
 
+background_tasks: Dict[str, Dict] = {}
+
+def update_task_status(task_id: str, status: str, message: str = None, result: dict = None, validation_results: dict = None):
+    """Updated to include validation results"""
+    background_tasks[task_id] = {
+        "status": status,
+        "message": message,
+        "result": result,
+        "validation_results": validation_results,
+        "timestamp": datetime.now().isoformat()
+    }
+
+def get_task_status(task_id: str) -> dict:
+    """Get the status of a background task"""
+    return background_tasks.get(task_id, {"status": "not_found"})
+
+def process_images_in_background(task_id: str, folder_location: str, prompt: str):
+    """Modified to handle background processing with status updates and automatic validation"""
+    try:
+        update_task_status(task_id, "processing", "Starting image processing...")
+        
+        processor = ImageProcessor(
+            folder_paths=[folder_location],
+            prompt_template=prompt,
+            max_workers=5
+        )
+        results = processor.process_images()
+        
+        if results:
+            df = process_extracted_fields(results)
+            print("Processed results shape:", df.shape)
+            
+            # Clean up the images directory
+            output_dir = "images"
+            try:
+                for filename in os.listdir(output_dir):
+                    file_path = os.path.join(output_dir, filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                print(f"Successfully cleaned up {output_dir} directory")
+            except Exception as e:
+                print(f"Error cleaning up {output_dir} directory: {str(e)}")
+            
+            result_data = {
+                "rows_processed": len(df),
+                "columns": list(df.columns),
+                "preview": df.head(5).to_dict(orient='records')
+            }
+            update_task_status(task_id, "completed", "Processing completed successfully", result_data)
+            
+            # Automatically trigger validation after processing
+            try:
+                validate_extracted_data(task_id)
+            except Exception as validation_error:
+                print(f"Validation error: {str(validation_error)}")
+            
+            return df
+        else:
+            update_task_status(task_id, "completed", "No images processed")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        error_msg = f"Error during processing: {str(e)}"
+        update_task_status(task_id, "failed", error_msg)
+        raise e
 
 def save_image(image_data: BytesIO) -> str:
     # Create the 'images' folder if it doesn't exist
@@ -284,5 +393,93 @@ def extract_zip(file: UploadFile) -> list:
                 saved_filename = save_image(BytesIO(zip_ref.read(file_name)))
 
     return extracted_images
+
+
+async def validate_extracted_data(task_id: str):
+    """Validate extracted data against master data with streaming response"""
+    try:
+        task_status = get_task_status(task_id)
+        if (task_status["status"] != "completed"):
+            yield {"status": "validation_pending", "message": "Waiting for processing to complete"}
+            return
+        
+        result_data = task_status.get("result", {})
+        if not result_data:
+            yield {"status": "validation_failed", "message": "No data available for validation"}
+            return
+        
+        master_df = pd.read_csv("extracted_data_20250202_004225.csv")  
+        processed_df = pd.DataFrame(result_data.get("preview", []))
+        
+        validation_results = []
+        print("validation results", validation_results)
+        
+        # Perform validation for each invoice
+        for _, row in processed_df.iterrows():
+            invoice_num = row.get('invoice_number')
+            validation_record = {
+                "invoice_number": invoice_num,
+                "is_valid": False,
+                "discrepancy": None,
+                "master_subtotal": None,
+                "processed_subtotal": None,
+                "difference": None
+            }
+            
+            if invoice_num:
+                master_record = master_df[master_df['invoice_number'] == invoice_num]
+                if not master_record.empty:
+                    master_subtotal = master_record.iloc[0]['subtotal']
+                    processed_subtotal = row.get('subtotal')
+                    
+                    validation_record.update({
+                        "master_subtotal": master_subtotal,
+                        "processed_subtotal": processed_subtotal,
+                        "is_valid": master_subtotal == processed_subtotal,
+                        "difference": abs(master_subtotal - processed_subtotal) if master_subtotal != processed_subtotal else 0
+                    })
+                    
+                    if master_subtotal != processed_subtotal:
+                        validation_record["discrepancy"] = "Subtotal mismatch"
+                        print(f"Validation failed for invoice {invoice_num}: Subtotal mismatch")
+                else:
+                    validation_record["discrepancy"] = "Invoice not found in master data"
+            
+            validation_results.append(validation_record)
+            # Yield each validation result immediately
+            yield validation_record
+        
+        # Create DataFrame with validation results
+        validation_df = pd.DataFrame(validation_results)
+        
+        # Add validation results to the original processed DataFrame
+        result_df = processed_df.merge(
+            validation_df[['invoice_number', 'is_valid', 'discrepancy']], 
+            on='invoice_number', 
+            how='left'
+        )
+        
+        # Save to CSV with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = f"validated_data_{timestamp}.csv"
+        result_df.to_csv(csv_filename, index=False)
+        
+        # Yield final summary
+        yield {
+            "status": "validation_completed",
+            "message": "Validation completed",
+            "csv_file": csv_filename,
+            "summary": {
+                "total_records": len(validation_results),
+                "valid_records": sum(1 for r in validation_results if r["is_valid"]),
+                "invalid_records": sum(1 for r in validation_results if not r["is_valid"])
+            }
+        }
+        
+    except Exception as e:
+        error_msg = f"Validation error: {str(e)}"
+        yield {"status": "validation_failed", "message": error_msg}
+        raise e
+
 
 

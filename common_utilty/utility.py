@@ -63,8 +63,6 @@ class ImageProcessor:
             for future in as_completed(future_to_image):
                 result = future.result()
                 results.append(result)
-                # df = process_invoice_data(results)
-                # print("df",df)
         return results
 
 

@@ -12,7 +12,8 @@ from enum import Enum
 
 
 router = APIRouter()
-extracted_content = None
+# Create a dictionary to store extracted content per user
+user_content = {}
 chat_history = deque(maxlen=10)
 
 
@@ -62,6 +63,9 @@ async def upload_file(
                 detail="Failed to extract content from file"
             )
 
+        # Store the extracted content for this user
+        user_content[username] = extracted_content
+
         return JSONResponse(content={
             "message": "File processed successfully",
             "filename": file.filename,
@@ -81,9 +85,10 @@ async def chat_with_file(
     query: str,
     username: str = Depends(verify_auth)
 ):
-    if not extracted_content:
+    if username not in user_content or not user_content[username]:
         raise HTTPException(status_code=400, detail="No content available. Upload a file first.")
-    prompt = f"Context: {extracted_content}\n\nQuestion: {query}\n\nPlease provide a response based on the context above."
+    
+    prompt = f"Context: {user_content[username]}\n\n Question: {query}\n\n Please provide a response based on the context above."
 
     async def generate_stream():
         full_response = ""
@@ -104,7 +109,7 @@ async def chat_with_file(
         
         # Send any remaining buffer
         if buffer:
-            await asyncio.sleep(0.3)  # Add delay for final chunk
+            await asyncio.sleep(0.1)  # Add delay for final chunk
             yield json.dumps({
                 "chunk": buffer,
                 "status": "streaming"

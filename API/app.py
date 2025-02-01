@@ -5,13 +5,14 @@ from fastapi import UploadFile, File, HTTPException, APIRouter, BackgroundTasks,
 from pydantic_core import ValidationError
 from starlette.responses import JSONResponse, PlainTextResponse
 from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_field_extractor
-from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip
+from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip, validate_extracted_data
 from db.db import engine
 from db.table_handler import TableData
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import settings
 from AI_Agent.agent import BedrockClient
 from auth.auth_handler import verify_auth
+
 
 router = APIRouter()
 
@@ -185,19 +186,75 @@ async def preprocess_text_api(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from uuid import uuid4
+from API.utility import update_task_status, get_task_status
+
 @router.post("/process-bulk-images/")
 async def process_images(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     username: str = Depends(verify_auth)
 ):
-    # Check if the uploaded file is a .zip file
-    if not file.filename.endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Uploaded file must be a .zip file")
-    extract_zip(file)
-    # Process images in the background (we pass the images in memory directly)
-    prompt = static_field_extractor()  # Your prompt extraction logic here
-    # Run the task in the background
-    background_tasks.add_task(process_images_in_background, "./images", prompt)
-    # Return an immediate response
-    return {"status": "success", "message": "Processing started in the background."}
+    try:
+        if not file.filename.endswith(".zip"):
+            raise HTTPException(status_code=400, detail="Uploaded file must be a .zip file")
+        
+        # Generate unique task ID
+        task_id = str(uuid4())
+        
+        # Extract zip file
+        extract_zip(file)
+        
+        # Get prompt for field extraction
+        prompt = static_field_extractor()
+        
+        # Start background processing (validation happens automatically after processing)
+        background_tasks.add_task(
+            process_images_in_background,
+            task_id,
+            "./images",
+            prompt
+        )
+        
+        return {
+            "status": "processing",
+            "message": "Processing started (validation will run automatically after processing)",
+            "task_id": task_id
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing images: {str(e)}")
+
+@router.get("/process-status/{task_id}")
+async def get_processing_status(
+    task_id: str,
+    username: str = Depends(verify_auth)
+):
+    """Get the status of a background processing task"""
+    status = get_task_status(task_id)
+    if status["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="Task not found")
+    return status
+
+
+
+@router.get("/validation-results/{task_id}")
+async def get_validation_results(
+    task_id: str,
+    username: str = Depends(verify_auth)
+):
+    """Get the validation results for a specific task"""
+    status = get_task_status(task_id)
+    if status["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if "validation_results" not in status:
+        return {
+            "status": "pending",
+            "message": "Validation not completed yet"
+        }
+    
+    return {
+        "status": "completed",
+        "validation_results": status["validation_results"]
+    }

@@ -110,15 +110,12 @@ You are a precise document parser. Extract information from the provided documen
 REQUIRED FORMAT:
 {
     "metadata": {
-        "document_type": string,  // e.g., "invoice", "receipt", "quote", null
-        "confidence_score": float // 0.0 to 1.0, indicating extraction confidence
+        "document_type": string  // e.g., "invoice", "receipt", "quote", null
     },
     "invoice_details": {
         "invoice_number": string | null,
         "invoice_date": string | null,  // ISO 8601 format (YYYY-MM-DD)
-        "due_date": string | null,      // ISO 8601 format (YYYY-MM-DD)
-        "payment_terms": string | null,
-        "po_number": string | null
+        "due_date": string | null      // ISO 8601 format (YYYY-MM-DD)
     },
     "amounts": {
         "subtotal": number | null,
@@ -154,9 +151,7 @@ REQUIRED FORMAT:
     ],
     "notes": string | null,
     "payment_info": {
-        "payment_method": string | null,
-        "bank_account": string | null,
-        "routing_number": string | null
+        "payment_method": string | null
     }
 }
 
@@ -165,12 +160,11 @@ RULES:
 2. Use null for missing or unclear fields, never empty strings or 0
 3. Normalize all currency values to numbers without symbols (e.g., 1234.56 not $1,234.56)
 4. Use ISO 8601 (YYYY-MM-DD) for all dates
-5. Include confidence_score to indicate overall extraction quality
-6. Array fields (like line_items) should be empty array [] if no items found
-7. Standardize phone numbers to E.164 format when possible (+[country][number])
-8. Convert all websites to lowercase and include http(s)://
-9. Remove any trailing/leading whitespace from string values
-10. Sanitize all extracted text to remove special characters
+5. Array fields (like line_items) should be empty array [] if no items found
+6. Standardize phone numbers to E.164 format when possible (+[country][number])
+7. Convert all websites to lowercase and include http(s)://
+8. Remove any trailing/leading whitespace from string values
+9. Sanitize all extracted text to remove special characters
 
 IMPORTANT: Provide ONLY the JSON output. Any explanatory text or non-JSON content will break the parsing."""
 
