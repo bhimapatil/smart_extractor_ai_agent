@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test UI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Test UI</h1>
+
+  <!-- Table Name Section -->
+  <div class="div-main">
+    <div class="form-section">
+      <h3>Table Configuration</h3>
+      <input type="text" id="table-name" placeholder="Enter table name" />
+    </div>
+
+    <div class="form-section">
+      <h3>Columns Configuration</h3>
+      <div id="columns-list"></div>
+      <div class="button-div">
+        <button type="button" id="add-column-btn">Add Column</button>
+      </div>
+    </div>
+
+    <!-- Replace Input Text Section with File Upload Section -->
+    <div class="form-section">
+      <h3>File Upload</h3>
+      <div id="upload-container">
+          <label for="file-input">Choose a file:</label>
+          <input type="file" id="file-input" name="file" />
+          <p id="status"></p>
+      </div>
+      <div id="response-container">
+          <h2>Response Data:</h2>
+          <p id="response-text"></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section button-div">
+    <button type="button" id="submit-btn">Submit</button>
+  </div>
+
+  <div class="form-section extracted_data">
+    <h3>Extracted Data</h3>
+    <pre id="response-output"></pre>
+  </div>
+
+  <!-- Loader -->
+  <div id="loader" class="loader" style="display: none;">
+    <div class="loader-container">
+      <div class="loader-text">Processing...</div>
+    </div>
+  </div>
+
+  <div id = "insertData", class="insertdata">
+  <button id="insertDataBtn">Insert Data</button>
+  </div>
+
+  <script src="script.js"></script>
+
+</body>
+</html>
+

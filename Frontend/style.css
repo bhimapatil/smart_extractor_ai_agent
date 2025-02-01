@@ -1,0 +1,259 @@
+:root {
+  --primary: #007bff;
+  --primary-dark: #0056b3;
+  --surface-main: #f4f7f6;
+  --surface-card: #ffffff;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --border: #cccccc;
+  --shadow: rgba(0, 0, 0, 0.1);
+}
+*{
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  margin: 0;
+  padding: 2rem;
+  background-color: var(--surface-main);
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+h1, h3 {
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+}
+
+.div-main{
+  display: flex;
+  gap: 3px;
+  box-shadow: 0 4px 6px var(--shadow);
+  background-color: var(--surface-card);
+}
+
+.form-section {
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+  border-radius: 0.75rem;
+  width: 33%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+input, select, textarea, button {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.button-div {
+  justify-content: center;
+  width: 100% !important;
+  flex-direction: row !important;
+}
+
+button {
+  background-color: var(--primary);
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+  border: none;
+  padding: 0.75rem 1.5rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 120px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  resize: vertical;
+}
+
+#response-output {
+  white-space: pre-wrap;
+  background-color: #eef2f7;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.extracted_data {
+  width: 100%;
+}
+
+/* Loader Styles */
+.loader-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(244, 247, 246, 0.8);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(3px);
+}
+
+.loader {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--surface-card);
+  border-radius: 50%;
+  border-top: 4px solid var(--primary);
+  box-shadow: 0 4px 6px var(--shadow);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  body {
+    padding: 1rem;
+  }
+
+  .form-section {
+    padding: 1.5rem;
+  }
+
+  .loader {
+    width: 40px;
+    height: 40px;
+    border-width: 3px;
+  }
+}
+.response-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2rem;
+}
+
+.response-table th,
+.response-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+.response-table th {
+  background-color: #f5f5f5;
+  font-weight: bold;
+}
+
+.response-table tbody tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.response-table tbody tr:hover {
+  background-color: #f0f0f0;
+}
+
+h3 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+/* Response Container */
+#response-container {
+  display: none;
+  background-color: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 6px var(--shadow);
+  margin-top: 2rem;
+}
+
+/* Response Text Styling */
+#response-text {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--text-primary);
+}
+
+/* Styling for the extracted data section */
+.extracted_data {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: #333;
+}
+
+/* Loader Visibility */
+.loader-container.active {
+  display: flex;
+}
+
+/* Loader Animation */
+.loader {
+  border-top-color: var(--primary); /* Ensure the loader has the primary color */
+  animation: spin 1s linear infinite;
+}
+
+/* Keyframes for the loader animation */
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* File Input Styling */
+#file-input {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+/* Table Styling in Extracted Data */
+.response-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2rem;
+}
+
+.response-table th,
+.response-table td {
+  border: 1px solid var(--border);
+  padding: 10px;
+  text-align: left;
+}
+
+.response-table th {
+  background-color: #f5f5f5;
+  font-weight: bold;
+}
+
+.response-table tbody tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.response-table tbody tr:hover {
+  background-color: #f0f0f0;
+}
