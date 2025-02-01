@@ -1,16 +1,17 @@
 import os
 import sys
 import tempfile
-from fastapi import UploadFile, File, HTTPException, APIRouter, BackgroundTasks
+from fastapi import UploadFile, File, HTTPException, APIRouter, BackgroundTasks, Depends
 from pydantic_core import ValidationError
 from starlette.responses import JSONResponse, PlainTextResponse
-from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_feild_extrctor
+from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_field_extractor
 from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip
 from db.db import engine
 from db.table_handler import TableData
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import settings
 from AI_Agent.agent import BedrockClient
+from auth.auth_handler import verify_auth
 
 router = APIRouter()
 
@@ -20,7 +21,9 @@ temp_dir = tempfile.TemporaryDirectory()
 
 
 @router.post("/generate-response")
-async def generate_response(request: PromptRequest):
+async def generate_response(
+    request: PromptRequest,
+    username: str = Depends(verify_auth)):
     try:
         print("request",request)
         table_name = request.table_name.strip()
@@ -83,7 +86,10 @@ async def generate_response(request: PromptRequest):
 
 
 @router.post("/upload-and-extract-text/")
-async def upload_and_extract_text(file: UploadFile = File(...)):
+async def upload_and_extract_text(
+    file: UploadFile = File(...),
+    username: str = Depends(verify_auth)
+):
     try:
         # Check if the file is an image
         if not file.content_type.startswith("image/"):
@@ -129,7 +135,10 @@ async def upload_and_extract_text(file: UploadFile = File(...)):
 
 
 @router.post("/push-data/")
-async def push_data(payload: TableData):
+async def push_data(
+    payload: TableData,
+    username: str = Depends(verify_auth)
+):
     try:
         table_name = payload.table_name
         print("table_name",table_name)
@@ -159,7 +168,10 @@ async def push_data(payload: TableData):
 
 
 @router.post("/preprocess-text")
-async def preprocess_text_api(file: UploadFile = File(...)):
+async def preprocess_text_api(
+    file: UploadFile = File(...),
+    username: str = Depends(verify_auth)
+):
     try:
         if file.content_type != "text/plain":
             raise HTTPException(status_code=400, detail="Only plain text files are allowed.")
@@ -174,16 +186,17 @@ async def preprocess_text_api(file: UploadFile = File(...)):
 
 
 @router.post("/process-bulk-images/")
-async def process_images(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def process_images(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    username: str = Depends(verify_auth)
+):
     # Check if the uploaded file is a .zip file
     if not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a .zip file")
-
     extract_zip(file)
-
     # Process images in the background (we pass the images in memory directly)
-    prompt = static_feild_extrctor()  # Your prompt extraction logic here
-    print("prompt", prompt)
+    prompt = static_field_extractor()  # Your prompt extraction logic here
     # Run the task in the background
     background_tasks.add_task(process_images_in_background, "./images", prompt)
     # Return an immediate response

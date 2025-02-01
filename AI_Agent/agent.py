@@ -69,7 +69,6 @@ class BedrockClient:
                 accept="application/json"
             )
             response_body = json.loads(response['body'].read().decode("utf-8"))
-            print("Response Body:", response_body)
             if 'content' in response_body:
                 return response_body['content'][0]['text']
             else:

@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from contextlib import contextmanager
 from typing import Dict, Any, Optional
 import logging
+from auth.auth_handler import verify_auth
 
 logger = logging.getLogger(__name__)
 

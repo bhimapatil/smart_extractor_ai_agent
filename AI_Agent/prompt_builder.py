@@ -103,41 +103,75 @@ def text_extractor_prompt_builder():
     return prompt
 
 
-def static_feild_extrctor():
-    prompt= """
-    ### Extract key information from the document image. Identify document type, key details, and any significant data.
-        The output format should be in JSON.
-        Extract the following fields from the document image:
-        - invoice_number: The unique identifier for the invoice.
-        - invoice_date: The date of the invoice.
-        - company_name: The name of the company issuing the invoice.
-        - invoice_total: The total amount mentioned on the invoice.
-        - company_address: The address of the company.
-        - company_phone: The phone number of the company.
-        - company_email: The email address of the company.
-        - company_website: The website of the company.
-        - item: The item name.
-        - quantity: The quantity of the item.
-        - price: The price of the item.
-        - total: The total price for the item.
-        - tax: The tax amount.
-        - discount: The discount amount.
-        - grand_total: The grand total amount.
-        - due_date: The due date for payment.
-        - payment_terms: The payment terms mentioned on the invoice.
-        - notes: Any additional notes or comments.   
-        - If any of the fields are not present or unclear, mark them as `null`.
-        
-       ### Ensure the extracted information is structured as a JSON object like this:
-        ```json
+def static_field_extractor():
+    prompt = """
+You are a precise document parser. Extract information from the provided document image and return ONLY a JSON object with no additional text, explanations, or markdown formatting.
+
+REQUIRED FORMAT:
+{
+    "metadata": {
+        "document_type": string,  // e.g., "invoice", "receipt", "quote", null
+        "confidence_score": float // 0.0 to 1.0, indicating extraction confidence
+    },
+    "invoice_details": {
+        "invoice_number": string | null,
+        "invoice_date": string | null,  // ISO 8601 format (YYYY-MM-DD)
+        "due_date": string | null,      // ISO 8601 format (YYYY-MM-DD)
+        "payment_terms": string | null,
+        "po_number": string | null
+    },
+    "amounts": {
+        "subtotal": number | null,
+        "tax": number | null,
+        "discount": number | null,
+        "shipping": number | null,
+        "total": number | null         // Always use decimal format (e.g., 1234.56)
+    },
+    "company": {
+        "name": string | null,
+        "address": {
+            "street": string | null,
+            "city": string | null,
+            "state": string | null,
+            "postal_code": string | null,
+            "country": string | null
+        },
+        "contact": {
+            "phone": string | null,
+            "email": string | null,
+            "website": string | null
+        },
+        "tax_id": string | null
+    },
+    "line_items": [
         {
-          "invoice_number": "12345",
-          "invoice_date": "2024-07-01",
-          "invoice_total": "1000.00",
-          "company_name": "XYZ Corporation",
-          "company_address": "123 Business Rd, City, Country",
-          "company_phone": "+1234567890",
-          "company_email": "contact@xyzcorporation.com",
-          "company_website": "https://www.xyzcorporation.com"
-        }"""
+            "item": string | null,
+            "description": string | null,
+            "quantity": number | null,
+            "unit_price": number | null,
+            "total": number | null
+        }
+    ],
+    "notes": string | null,
+    "payment_info": {
+        "payment_method": string | null,
+        "bank_account": string | null,
+        "routing_number": string | null
+    }
+}
+
+RULES:
+1. Return ONLY valid JSON - no explanations or additional text
+2. Use null for missing or unclear fields, never empty strings or 0
+3. Normalize all currency values to numbers without symbols (e.g., 1234.56 not $1,234.56)
+4. Use ISO 8601 (YYYY-MM-DD) for all dates
+5. Include confidence_score to indicate overall extraction quality
+6. Array fields (like line_items) should be empty array [] if no items found
+7. Standardize phone numbers to E.164 format when possible (+[country][number])
+8. Convert all websites to lowercase and include http(s)://
+9. Remove any trailing/leading whitespace from string values
+10. Sanitize all extracted text to remove special characters
+
+IMPORTANT: Provide ONLY the JSON output. Any explanatory text or non-JSON content will break the parsing."""
+
     return prompt

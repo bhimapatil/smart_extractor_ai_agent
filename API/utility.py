@@ -7,13 +7,12 @@ from datetime import datetime
 from io import BytesIO
 from tkinter import Image
 from typing import Dict, Union
-
+import pandas as pd
 from fastapi import HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import Integer, String, Float, DateTime, VARCHAR, BOOLEAN, TEXT, DATE, TIME, DECIMAL, SMALLINT, \
     MetaData, inspect, Table, Column, ForeignKey
 from sqlalchemy.exc import SQLAlchemyError
-
 from AI_Agent.agent import BedrockClient
 from common_utilty.utility import ImageProcessor
 from config import settings
@@ -200,6 +199,40 @@ def handle_table_operations(engine, data, table_schema, table_name, reference_in
 
 
 
+
+
+def process_invoice_data(result):
+    data = []
+    for entry in result:
+        invoice = entry["invoice_data"]
+        for item in invoice["items"]:
+            data.append({
+                "Image Path": entry["image_path"],
+                "Filename": entry["filename"],
+                "Invoice Number": invoice["invoice_number"],
+                "Invoice Date": invoice["invoice_date"],
+                "Company Name": invoice["company_name"],
+                "Company Address": invoice["company_address"],
+                "Company Phone": invoice["company_phone"],
+                "Company Email": invoice["company_email"],
+                "Company Website": invoice["company_website"],
+                "Item": item["item"],
+                "Quantity": item["quantity"],
+                "Price": item["price"],
+                "Total": item["total"],
+                "Tax": invoice["tax"],
+                "Discount": invoice["discount"],
+                "Grand Total": invoice["grand_total"],
+                "Due Date": invoice["due_date"],
+                "Payment Terms": invoice["payment_terms"],
+                "Notes": invoice["notes"]
+            })
+    
+    return pd.DataFrame(data)
+
+
+
+
 def process_images_in_background(folder_location: str, prompt: str):
     processor = ImageProcessor(
         folder_paths=[folder_location],
@@ -207,20 +240,21 @@ def process_images_in_background(folder_location: str, prompt: str):
         max_workers=5
     )
     results_df = processor.process_images()
-    results_df.to_csv("processed_images.csv", index=False)
+    # results_df.to_csv("processed_results.csv", index=False)
     if results_df.empty:
         print("No images processed.")
         return
-    results = results_df.to_dict(orient="records")
-    print("Processed results:", results)
+    print("Processed results:")
 
     print("Cleaning...")
-    if os.listdir(folder_location):  # If the folder is empty
-        try:
-            shutil.rmtree(folder_location)  # Remove the folder
-            print(f"Deleted empty folder: {folder_location}")
-        except Exception as e:
-            print(f"Error deleting folder {folder_location}: {e}")
+    # if os.listdir(folder_location):  # If the folder is empty
+    #     try:
+    #         shutil.rmtree(folder_location)  # Remove the folder
+    #         print(f"Deleted empty folder: {folder_location}")
+    #     except Exception as e:
+    #         print(f"Error deleting folder {folder_location}: {e}")
+
+    return df
 
 
 def save_image(image_data: BytesIO) -> str:
@@ -250,3 +284,5 @@ def extract_zip(file: UploadFile) -> list:
                 saved_filename = save_image(BytesIO(zip_ref.read(file_name)))
 
     return extracted_images
+
+

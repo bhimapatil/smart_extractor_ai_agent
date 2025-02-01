@@ -3,7 +3,6 @@ import logging
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from AI_Agent.agents_client import BedrockAgent
-
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,12 +33,12 @@ class ImageProcessor:
         try:
             prompt = f"{self.prompt_template}"
             response = self.agent.get_response(prompt, image_path)
-            result = {
-                'image_path': image_path,
-                'filename': os.path.basename(image_path),
-                'ai_response': response
-            }
-            return result
+            # result = {
+                # 'image_path': image_path,
+                # 'filename': os.path.basename(image_path),
+                # 'ai_response': response
+            #}
+            return response
         except Exception as e:
             logger.error(f"Error processing {image_path}: {str(e)}")
             return {
@@ -49,11 +48,13 @@ class ImageProcessor:
             }
 
     def process_images(self):
+        from API.utility import process_invoice_data
         image_paths = self._find_images()
         if not image_paths:
             logger.warning("No images found in the specified folders.")
             return pd.DataFrame(columns=['image_path', 'filename', 'ai_response'])
         results = []
+        print("final list of results",results)
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_image = {
                 executor.submit(self._process_single_image, img_path): img_path
@@ -62,5 +63,11 @@ class ImageProcessor:
             for future in as_completed(future_to_image):
                 result = future.result()
                 results.append(result)
-        df = pd.DataFrame(results)
-        return df
+                # df = process_invoice_data(results)
+                # print("df",df)
+        return results
+
+
+
+
+
