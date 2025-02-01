@@ -1,3 +1,4 @@
+from typing import Iterator
 import boto3
 import json
 import time
@@ -79,9 +80,57 @@ class BedrockClient:
             time.sleep(1)
             return ""
 
+    def get_response_streaming_from_bedrock(self, prompt, image_path=None) -> Iterator[str]:
+        messages = [
+            {
+                "role": "user",
+                "content": []
+            }
+        ]
 
+        if image_path:
+            pass
 
+        if prompt:
+            messages[0]["content"].append({
+                "type": "text",
+                "text": prompt
+            })
 
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1000,
+            "messages": messages
+        }
+
+        inference_profile_arn = "arn:aws:bedrock:ap-south-1:725794772865:inference-profile/apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+
+        try:
+            response = self.bedrock_client.invoke_model_with_response_stream(
+                modelId=inference_profile_arn,
+                body=json.dumps(body),
+                contentType="application/json",
+                accept="application/json"
+            )
+
+            for event in response['body']:
+                try:
+                    chunk = json.loads(event['chunk']['bytes'])
+                    # Handle different response structures
+                    if isinstance(chunk, dict):
+                        if 'content' in chunk and isinstance(chunk['content'], list):
+                            for content_item in chunk['content']:
+                                if content_item.get('type') == 'text':
+                                    yield content_item.get('text', '')
+                        elif 'delta' in chunk and 'text' in chunk['delta']:
+                            yield chunk['delta']['text']
+                except Exception as e:
+                    print(f"Error processing chunk: {str(e)}")
+                    continue
+
+        except Exception as e:
+            print(f"Error in streaming response: {str(e)}")
+            yield ""
 
 # def check_bedrock_connection():
 #     ACCESS_KEY = settings.bedrock_access_key
