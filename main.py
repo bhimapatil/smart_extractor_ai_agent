@@ -5,13 +5,13 @@ from API.app import router as agent_router
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from fastapi.middleware.cors import CORSMiddleware
-
+from chatbot.app import router as chatbot_router
 
 
 
 app = FastAPI( )
 app.include_router(agent_router, tags=["agent_router"])
-
+app.include_router(chatbot_router, tags=["chatbot_router"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:63342","http://localhost:3000"],

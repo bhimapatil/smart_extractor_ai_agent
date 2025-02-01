@@ -5,7 +5,6 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_feild_extrctor
 from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background
 import os, sys
-
 from common_utilty.utility import ImageProcessor
 from db.db import engine
 from db.table_handler import TableData

@@ -8,3 +8,5 @@ uvicorn
 fastapi
 pymysql
 sqlalchemy
+pdfplumber
+openpyxl
