@@ -1,17 +1,22 @@
 import os
+import shutil
 import tempfile
-from tkinter import Image
 import traceback
-from fastapi import HTTPException, UploadFile, File
-from pydantic import BaseModel, Field
+import zipfile
+from datetime import datetime
+from io import BytesIO
+from tkinter import Image
 from typing import Dict, Union
+
+from fastapi import HTTPException, UploadFile, File
+from pydantic import BaseModel
+from sqlalchemy import Integer, String, Float, DateTime, VARCHAR, BOOLEAN, TEXT, DATE, TIME, DECIMAL, SMALLINT, \
+    MetaData, inspect, Table, Column, ForeignKey
+from sqlalchemy.exc import SQLAlchemyError
+
 from AI_Agent.agent import BedrockClient
-from AI_Agent.agents_client import BedrockAgent
 from common_utilty.utility import ImageProcessor
 from config import settings
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import Integer, String, Float, DateTime, VARCHAR, BOOLEAN, TEXT, DATE, TIME, DECIMAL, SMALLINT, \
-    MetaData, inspect, create_engine, Table, Column, ForeignKey
 
 
 class ColumnRelation(BaseModel):
@@ -209,10 +214,39 @@ def process_images_in_background(folder_location: str, prompt: str):
     results = results_df.to_dict(orient="records")
     print("Processed results:", results)
 
+    print("Cleaning...")
+    if os.listdir(folder_location):  # If the folder is empty
+        try:
+            shutil.rmtree(folder_location)  # Remove the folder
+            print(f"Deleted empty folder: {folder_location}")
+        except Exception as e:
+            print(f"Error deleting folder {folder_location}: {e}")
 
 
+def save_image(image_data: BytesIO) -> str:
+    # Create the 'images' folder if it doesn't exist
+    output_dir = "images"
+    os.makedirs(output_dir, exist_ok=True)
+    base_filename = "invoice"
+
+    # Generate a filename using the provided base name and current datetime
+    filename = f"{base_filename}-{datetime.now().timestamp()}.png"  # Save as PNG
+    file_path = os.path.join(output_dir, filename)
+
+    # Save the image to the file system
+    with open(file_path, "wb") as f:
+        f.write(image_data.getvalue())
+
+    # Return the saved file path or filename
+    return filename
 
 
+def extract_zip(file: UploadFile) -> list:
+    extracted_images = []
 
+    with zipfile.ZipFile(BytesIO(file.file.read())) as zip_ref:
+        for file_name in zip_ref.namelist():
+            if file_name.lower().endswith(('png', 'jpg', 'jpeg')):
+                saved_filename = save_image(BytesIO(zip_ref.read(file_name)))
 
-
+    return extracted_images
