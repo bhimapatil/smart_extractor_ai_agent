@@ -1,12 +1,11 @@
+import os
+import sys
 import tempfile
 from fastapi import UploadFile, File, HTTPException, APIRouter, BackgroundTasks
 from pydantic_core import ValidationError
 from starlette.responses import JSONResponse, PlainTextResponse
 from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_feild_extrctor
-from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background
-import os, sys
-
-from common_utilty.utility import ImageProcessor
+from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip
 from db.db import engine
 from db.table_handler import TableData
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -175,12 +174,17 @@ async def preprocess_text_api(file: UploadFile = File(...)):
 
 
 @router.post("/process-bulk-images/")
-async def process_images(folder_location: str, background_tasks: BackgroundTasks):
-    if not os.path.exists(folder_location):
-        raise HTTPException(status_code=400, detail="Folder not found")
-    prompt = static_feild_extrctor()
+async def process_images(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+    # Check if the uploaded file is a .zip file
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a .zip file")
+
+    extract_zip(file)
+
+    # Process images in the background (we pass the images in memory directly)
+    prompt = static_feild_extrctor()  # Your prompt extraction logic here
     print("prompt", prompt)
     # Run the task in the background
-    background_tasks.add_task(process_images_in_background, folder_location, prompt)
+    background_tasks.add_task(process_images_in_background, "./images", prompt)
     # Return an immediate response
     return {"status": "success", "message": "Processing started in the background."}
