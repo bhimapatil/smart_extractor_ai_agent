@@ -43,7 +43,6 @@ async def chat_with_file(query: str):
         "query": query,
         "response": response,
     })
-    
     return JSONResponse(content={"response": response})
 
 @router.get("/chat-history/")

@@ -1,12 +1,6 @@
 import pdfplumber
-from PIL import Image
-import io
 import pandas as pd
 from fastapi import UploadFile
-
-
-
-
 
 def extract_text_from_pdf(file: UploadFile):
     text = ""
