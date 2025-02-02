@@ -382,25 +382,36 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
         
         try:
             master_df = pd.read_csv("extracted_data_20250202_004225.csv")
+            # Group master data by invoice_number and get first occurrence of totals
+            master_grouped = master_df.groupby('invoice_number').agg({
+                'subtotal': 'first',
+                'tax': 'first',
+                'total': 'first'
+            }).reset_index()
         except FileNotFoundError:
             return {"status": "error", "message": "Master data file not found"}
 
         try:
             processed_df = pd.read_csv("extracted_data/processed_data.csv")
+            # Group processed data by invoice_number and get first occurrence of totals
+            processed_grouped = processed_df.groupby('invoice_number').agg({
+                'subtotal': 'first',
+                'tax': 'first',
+                'total': 'first'
+            }).reset_index()
         except FileNotFoundError:
             return {"status": "error", "message": "Processed data file not found"}
 
-        if processed_df.empty:
+        if processed_grouped.empty:
             return {"status": "error", "message": "Processed data is empty"}
 
         validation_results = []
         
-        for _, row in processed_df.iterrows():
+        # Validate at invoice level using grouped data
+        for _, row in processed_grouped.iterrows():
             try:
-                invoice_num = str(row.get('invoice_number', ''))
-                if not invoice_num:
-                    continue
-
+                invoice_num = str(row['invoice_number'])
+                
                 validation_record = {
                     "invoice_number": invoice_num,
                     "is_valid": True,
@@ -409,11 +420,12 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                         "master": {},
                         "processed": {},
                         "differences": {}
-                    }
+                    },
+                    "line_items": []
                 }
 
-                # Find matching record in master data
-                master_row = master_df[master_df['invoice_number'].astype(str) == invoice_num]
+                # Find matching invoice in master data
+                master_row = master_grouped[master_grouped['invoice_number'].astype(str) == invoice_num]
                 if master_row.empty:
                     validation_record["is_valid"] = False
                     validation_record["discrepancies"].append("Invoice not found in master data")
@@ -422,7 +434,7 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
 
                 master_row = master_row.iloc[0]
 
-                # Validate numerical fields
+                # Validate invoice totals
                 for field in ['subtotal', 'tax', 'total']:
                     try:
                         master_value = float(master_row[field]) if pd.notnull(master_row[field]) else 0.0
@@ -441,17 +453,41 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                         validation_record["is_valid"] = False
                         validation_record["discrepancies"].append(f"Error comparing {field}: {str(e)}")
 
+                # Get line items for this invoice
+                master_items = master_df[master_df['invoice_number'] == invoice_num]
+                processed_items = processed_df[processed_df['invoice_number'] == invoice_num]
+
+                # Validate line items
+                for _, p_item in processed_items.iterrows():
+                    item_match = master_items[master_items['item'] == p_item['item']]
+                    item_validation = {
+                        "item": p_item['item'],
+                        "quantity": {
+                            "master": float(item_match['quantity'].iloc[0]) if not item_match.empty else None,
+                            "processed": float(p_item['quantity'])
+                        },
+                        "unit_price": {
+                            "master": float(item_match['unit_price'].iloc[0]) if not item_match.empty else None,
+                            "processed": float(p_item['unit_price'])
+                        },
+                        "line_total": {
+                            "master": float(item_match['line_total'].iloc[0]) if not item_match.empty else None,
+                            "processed": float(p_item['line_total'])
+                        }
+                    }
+                    validation_record["line_items"].append(item_validation)
+
                 validation_results.append(validation_record)
             except Exception as e:
-                print(f"Error processing row: {str(e)}")
+                print(f"Error processing invoice {invoice_num}: {str(e)}")
                 continue
 
         # Create summary
         summary = {
-            "total_records": len(validation_results),
-            "valid_records": sum(1 for r in validation_results if r["is_valid"]),
-            "invalid_records": sum(1 for r in validation_results if not r["is_valid"]),
-            "records_with_discrepancies": len([r for r in validation_results if r["discrepancies"]])
+            "total_invoices": len(validation_results),
+            "valid_invoices": sum(1 for r in validation_results if r["is_valid"]),
+            "invalid_invoices": sum(1 for r in validation_results if not r["is_valid"]),
+            "invoices_with_discrepancies": len([r for r in validation_results if r["discrepancies"]])
         }
 
         return {
