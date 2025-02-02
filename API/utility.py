@@ -20,6 +20,8 @@ from config import settings
 import json
 from typing import Dict
 
+
+
 class ColumnRelation(BaseModel):
     data_type: str
     reference_table: str
@@ -32,6 +34,7 @@ class PromptRequest(BaseModel):
     input_text: str
 
 client = BedrockClient(access_key=settings.bedrock_access_key,secret_key=settings.bedrock_secret_access_key,)
+
 
 
 def convert_image_to_png(input_image_path, output_image_path="temp_image.png"):
@@ -203,35 +206,34 @@ def handle_table_operations(engine, data, table_schema, table_name, reference_in
 
 
 
-def process_invoice_data(result):
-    data = []
-    for entry in result:
-        invoice = entry["invoice_data"]
-        for item in invoice["items"]:
-            data.append({
-                "Image Path": entry["image_path"],
-                "Filename": entry["filename"],
-                "Invoice Number": invoice["invoice_number"],
-                "Invoice Date": invoice["invoice_date"],
-                "Company Name": invoice["company_name"],
-                "Company Address": invoice["company_address"],
-                "Company Phone": invoice["company_phone"],
-                "Company Email": invoice["company_email"],
-                "Company Website": invoice["company_website"],
-                "Item": item["item"],
-                "Quantity": item["quantity"],
-                "Price": item["price"],
-                "Total": item["total"],
-                "Tax": invoice["tax"],
-                "Discount": invoice["discount"],
-                "Grand Total": invoice["grand_total"],
-                "Due Date": invoice["due_date"],
-                "Payment Terms": invoice["payment_terms"],
-                "Notes": invoice["notes"]
-            })
-    
-    return pd.DataFrame(data)
+# def process_invoice_data(result):
+#     data = []
+#     for entry in result:
+#         invoice = entry["invoice_data"]
+#         for item in invoice["items"]:
+#             data.append({
+#                 "Image Path": entry["image_path"],
+#                 "Filename": entry["filename"],
+#                 "Invoice Number": invoice["invoice_number"],
+#                 "Invoice Date": invoice["invoice_date"],
+#                 "Company Name": invoice["company_name"],
+#                 "Company Address": invoice["company_address"],
+#                 "Company Phone": invoice["company_phone"],
+#                 "Company Email": invoice["company_email"],
+#                 "Company Website": invoice["company_website"],
+#                 "Item": item["item"],
+#                 "Quantity": item["quantity"],
+#                 "Price": item["price"],
+#                 "Total": item["total"],
+#                 "Tax": invoice["tax"],
+#                 "Discount": invoice["discount"],
+#                 "Grand Total": invoice["grand_total"],
+#                 "Due Date": invoice["due_date"],
+#                 "Payment Terms": invoice["payment_terms"],
+#                 "Notes": invoice["notes"]
+#             })
 
+#     return pd.DataFrame(data)
 
 
 
@@ -288,16 +290,17 @@ def process_extracted_fields(results: List[Dict[str, Any]]) -> DataFrame:
         except Exception as e:
             print(f"Error processing result: {e}")
             continue
-    
     # Create DataFrame
     df = pd.DataFrame(flattened_data)
-    
-    # Save to CSV with timestamp
+    if not os.path.exists("extracted_data"):
+        os.makedirs("extracted_data")
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_filename = f"extracted_data_{timestamp}.csv"
+    csv_filename = os.path.join("extracted_data","processed_data.csv")
+    print(f"Saving processed data to {csv_filename}")
+
     df.to_csv(csv_filename, index=False)
     print(f"Data saved to {csv_filename}")
-    
     return df
 
 background_tasks: Dict[str, Dict] = {}
@@ -349,13 +352,6 @@ def process_images_in_background(task_id: str, folder_location: str, prompt: str
                 "preview": df.head(5).to_dict(orient='records')
             }
             update_task_status(task_id, "completed", "Processing completed successfully", result_data)
-            
-            # Automatically trigger validation after processing
-            try:
-                validate_extracted_data(task_id)
-            except Exception as validation_error:
-                print(f"Validation error: {str(validation_error)}")
-            
             return df
         else:
             update_task_status(task_id, "completed", "No images processed")
@@ -366,120 +362,127 @@ def process_images_in_background(task_id: str, folder_location: str, prompt: str
         update_task_status(task_id, "failed", error_msg)
         raise e
 
+
+
+
+
+
+
+
+
+
+
+
+def validate_extracted_data(task_id: str) -> Dict[str, Any]:
+    """Validates extracted data against master data. This is a synchronous function."""
+    try:
+        task_status = get_task_status(task_id)
+        if task_status["status"] != "completed":
+            return {"status": "validation_pending", "message": "Waiting for processing to complete"}
+        
+        try:
+            master_df = pd.read_csv("extracted_data_20250202_004225.csv")
+        except FileNotFoundError:
+            return {"status": "error", "message": "Master data file not found"}
+
+        try:
+            processed_df = pd.read_csv("extracted_data/processed_data.csv")
+        except FileNotFoundError:
+            return {"status": "error", "message": "Processed data file not found"}
+
+        if processed_df.empty:
+            return {"status": "error", "message": "Processed data is empty"}
+
+        validation_results = []
+        
+        for _, row in processed_df.iterrows():
+            try:
+                invoice_num = str(row.get('invoice_number', ''))
+                if not invoice_num:
+                    continue
+
+                validation_record = {
+                    "invoice_number": invoice_num,
+                    "is_valid": True,
+                    "discrepancies": [],
+                    "totals": {
+                        "master": {},
+                        "processed": {},
+                        "differences": {}
+                    }
+                }
+
+                # Find matching record in master data
+                master_row = master_df[master_df['invoice_number'].astype(str) == invoice_num]
+                if master_row.empty:
+                    validation_record["is_valid"] = False
+                    validation_record["discrepancies"].append("Invoice not found in master data")
+                    validation_results.append(validation_record)
+                    continue
+
+                master_row = master_row.iloc[0]
+
+                # Validate numerical fields
+                for field in ['subtotal', 'tax', 'total']:
+                    try:
+                        master_value = float(master_row[field]) if pd.notnull(master_row[field]) else 0.0
+                        processed_value = float(row[field]) if pd.notnull(row[field]) else 0.0
+                        
+                        validation_record["totals"]["master"][field] = master_value
+                        validation_record["totals"]["processed"][field] = processed_value
+                        validation_record["totals"]["differences"][field] = abs(master_value - processed_value)
+
+                        if abs(master_value - processed_value) > 0.01:
+                            validation_record["is_valid"] = False
+                            validation_record["discrepancies"].append(
+                                f"{field} mismatch: master={master_value}, processed={processed_value}"
+                            )
+                    except (ValueError, TypeError) as e:
+                        validation_record["is_valid"] = False
+                        validation_record["discrepancies"].append(f"Error comparing {field}: {str(e)}")
+
+                validation_results.append(validation_record)
+            except Exception as e:
+                print(f"Error processing row: {str(e)}")
+                continue
+
+        # Create summary
+        summary = {
+            "total_records": len(validation_results),
+            "valid_records": sum(1 for r in validation_results if r["is_valid"]),
+            "invalid_records": sum(1 for r in validation_results if not r["is_valid"]),
+            "records_with_discrepancies": len([r for r in validation_results if r["discrepancies"]])
+        }
+
+        return {
+            "status": "validation_completed",
+            "summary": summary,
+            "validation_results": validation_results
+        }
+
+    except Exception as e:
+        print(f"Debug: Validation error occurred: {str(e)}")
+        return {
+            "status": "validation_failed",
+            "message": str(e),
+            "error_details": traceback.format_exc()
+        }
+
 def save_image(image_data: BytesIO) -> str:
-    # Create the 'images' folder if it doesn't exist
     output_dir = "images"
     os.makedirs(output_dir, exist_ok=True)
     base_filename = "invoice"
-
-    # Generate a filename using the provided base name and current datetime
-    filename = f"{base_filename}-{datetime.now().timestamp()}.png"  # Save as PNG
+    filename = f"{base_filename}-{datetime.now().timestamp()}.png"
     file_path = os.path.join(output_dir, filename)
-
-    # Save the image to the file system
+    
     with open(file_path, "wb") as f:
         f.write(image_data.getvalue())
-
-    # Return the saved file path or filename
     return filename
-
 
 def extract_zip(file: UploadFile) -> list:
     extracted_images = []
-
     with zipfile.ZipFile(BytesIO(file.file.read())) as zip_ref:
         for file_name in zip_ref.namelist():
             if file_name.lower().endswith(('png', 'jpg', 'jpeg')):
                 saved_filename = save_image(BytesIO(zip_ref.read(file_name)))
-
     return extracted_images
-
-
-async def validate_extracted_data(task_id: str):
-    """Validate extracted data against master data with streaming response"""
-    try:
-        task_status = get_task_status(task_id)
-        if (task_status["status"] != "completed"):
-            yield {"status": "validation_pending", "message": "Waiting for processing to complete"}
-            return
-        
-        result_data = task_status.get("result", {})
-        if not result_data:
-            yield {"status": "validation_failed", "message": "No data available for validation"}
-            return
-        
-        master_df = pd.read_csv("extracted_data_20250202_004225.csv")  
-        processed_df = pd.DataFrame(result_data.get("preview", []))
-        
-        validation_results = []
-        print("validation results", validation_results)
-        
-        # Perform validation for each invoice
-        for _, row in processed_df.iterrows():
-            invoice_num = row.get('invoice_number')
-            validation_record = {
-                "invoice_number": invoice_num,
-                "is_valid": False,
-                "discrepancy": None,
-                "master_subtotal": None,
-                "processed_subtotal": None,
-                "difference": None
-            }
-            
-            if invoice_num:
-                master_record = master_df[master_df['invoice_number'] == invoice_num]
-                if not master_record.empty:
-                    master_subtotal = master_record.iloc[0]['subtotal']
-                    processed_subtotal = row.get('subtotal')
-                    
-                    validation_record.update({
-                        "master_subtotal": master_subtotal,
-                        "processed_subtotal": processed_subtotal,
-                        "is_valid": master_subtotal == processed_subtotal,
-                        "difference": abs(master_subtotal - processed_subtotal) if master_subtotal != processed_subtotal else 0
-                    })
-                    
-                    if master_subtotal != processed_subtotal:
-                        validation_record["discrepancy"] = "Subtotal mismatch"
-                        print(f"Validation failed for invoice {invoice_num}: Subtotal mismatch")
-                else:
-                    validation_record["discrepancy"] = "Invoice not found in master data"
-            
-            validation_results.append(validation_record)
-            # Yield each validation result immediately
-            yield validation_record
-        
-        # Create DataFrame with validation results
-        validation_df = pd.DataFrame(validation_results)
-        
-        # Add validation results to the original processed DataFrame
-        result_df = processed_df.merge(
-            validation_df[['invoice_number', 'is_valid', 'discrepancy']], 
-            on='invoice_number', 
-            how='left'
-        )
-        
-        # Save to CSV with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_filename = f"validated_data_{timestamp}.csv"
-        result_df.to_csv(csv_filename, index=False)
-        
-        # Yield final summary
-        yield {
-            "status": "validation_completed",
-            "message": "Validation completed",
-            "csv_file": csv_filename,
-            "summary": {
-                "total_records": len(validation_results),
-                "valid_records": sum(1 for r in validation_results if r["is_valid"]),
-                "invalid_records": sum(1 for r in validation_results if not r["is_valid"])
-            }
-        }
-        
-    except Exception as e:
-        error_msg = f"Validation error: {str(e)}"
-        yield {"status": "validation_failed", "message": error_msg}
-        raise e
-
-
-

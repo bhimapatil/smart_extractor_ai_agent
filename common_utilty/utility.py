@@ -48,7 +48,7 @@ class ImageProcessor:
             }
 
     def process_images(self):
-        from API.utility import process_invoice_data
+        # from API.utility import process_invoice_data
         image_paths = self._find_images()
         if not image_paths:
             logger.warning("No images found in the specified folders.")

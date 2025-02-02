@@ -12,6 +12,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import settings
 from AI_Agent.agent import BedrockClient
 from auth.auth_handler import verify_auth
+from uuid import uuid4
+from API.utility import update_task_status, get_task_status
+import traceback
 
 
 router = APIRouter()
@@ -186,8 +189,6 @@ async def preprocess_text_api(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-from uuid import uuid4
-from API.utility import update_task_status, get_task_status
 
 @router.post("/process-bulk-images/")
 async def process_images(
@@ -239,22 +240,35 @@ async def get_processing_status(
 
 
 @router.get("/validation-results/{task_id}")
-async def get_validation_results(
-    task_id: str,
-    username: str = Depends(verify_auth)
-):
-    """Get the validation results for a specific task"""
-    status = get_task_status(task_id)
-    if status["status"] == "not_found":
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    if "validation_results" not in status:
-        return {
-            "status": "pending",
-            "message": "Validation not completed yet"
-        }
-    
-    return {
-        "status": "completed",
-        "validation_results": status["validation_results"]
-    }
+async def get_validation_results(task_id: str, username: str = Depends(verify_auth)):
+    try:
+        status = get_task_status(task_id)
+        if status["status"] == "not_found":
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if status["status"] != "completed":
+            return {
+                "status": "pending",
+                "message": "Processing not completed yet"
+            }
+
+        result = validate_extracted_data(task_id)
+        
+        if result["status"] == "error":
+            return JSONResponse(
+                status_code=400,
+                content=result
+            )
+            
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        print(f"Validation error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Validation error: {str(e)}",
+                "error_details": traceback.format_exc()
+            }
+        )
