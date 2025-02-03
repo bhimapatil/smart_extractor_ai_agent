@@ -5,7 +5,7 @@ from fastapi import UploadFile, File, HTTPException, APIRouter, BackgroundTasks,
 from pydantic_core import ValidationError
 from starlette.responses import JSONResponse, PlainTextResponse
 from AI_Agent.prompt_builder import build_prompt, text_extractor_prompt_builder, static_field_extractor
-from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip, validate_extracted_data
+from API.utility import PromptRequest, temp_dir, handle_table_operations, process_images_in_background, extract_zip, validate_extracted_data, ImageProcessor, process_extracted_fields
 from db.db import engine
 from db.table_handler import TableData
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -15,6 +15,10 @@ from auth.auth_handler import verify_auth
 from uuid import uuid4
 from API.utility import update_task_status, get_task_status
 import traceback
+from sse_starlette.sse import EventSourceResponse
+import asyncio  # Ensure asyncio is imported
+from typing import AsyncGenerator
+import json 
 
 
 router = APIRouter()
@@ -203,18 +207,14 @@ async def process_images(
         # Generate unique task ID
         task_id = str(uuid4())
         
-        # Extract zip file
-        extract_zip(file)
+        # Read file content into memory
+        file_content = await file.read()
         
-        # Get prompt for field extraction
-        prompt = static_field_extractor()
-        
-        # Start background processing (validation happens automatically after processing)
+        # Start background processing
         background_tasks.add_task(
-            process_images_in_background,
+            process_images_task,
             task_id,
-            "./images",
-            prompt
+            file_content
         )
         
         return {
@@ -226,49 +226,68 @@ async def process_images(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing images: {str(e)}")
 
+async def process_images_task(task_id: str, file_content: bytes):
+    try:
+        # Extract zip file
+        extract_zip(file_content)
+        
+        # Get prompt for field extraction
+        prompt = static_field_extractor()
+        
+        # Start image processing
+        await process_images_in_background(task_id, "./images", prompt)
+
+    except Exception as e:
+        update_task_status(task_id, "failed", f"Error processing images: {str(e)}")
+
+async def process_status_generator(task_id: str) -> AsyncGenerator[str, None]:
+    """Generate status updates for image processing with partial results"""
+    last_update_count = 0
+    
+    while True:
+        status = get_task_status(task_id)
+        if status["status"] == "not_found":
+            yield "event: error\ndata: Task not found\n\n"
+            break
+            
+        current_updates = status.get("processing_updates", [])
+        if len(current_updates) > last_update_count:
+            # Send new updates only
+            new_updates = current_updates[last_update_count:]
+            for update in new_updates:
+                yield f"data: {json.dumps(update)}\n\n"
+            last_update_count = len(current_updates)
+            
+        # Send partial results if available
+        if status.get("result") and status.get("result").get("is_partial"):
+            yield f"data: {json.dumps({'type': 'partial_result', 'data': status['result']})}\n\n"
+        
+        if status["status"] in ["completed", "failed"]:
+            # Send final status
+            yield f"data: {json.dumps({'type': 'final', 'status': status})}\n\n"
+            break
+            
+        await asyncio.sleep(0.5)  # Shorter sleep time for more responsive updates
+
 @router.get("/process-status/{task_id}")
 async def get_processing_status(
     task_id: str,
     username: str = Depends(verify_auth)
 ):
-    """Get the status of a background processing task"""
-    status = get_task_status(task_id)
-    if status["status"] == "not_found":
-        raise HTTPException(status_code=404, detail="Task not found")
-    return status
-
-
+    """Stream processing status updates"""
+    return EventSourceResponse(
+        process_status_generator(task_id),
+        media_type="text/event-stream"
+    )
 
 @router.get("/validation-results/{task_id}")
 async def get_validation_results(task_id: str, username: str = Depends(verify_auth)):
-    try:
-        status = get_task_status(task_id)
-        if status["status"] == "not_found":
-            raise HTTPException(status_code=404, detail="Task not found")
+    async def validation_results_generator(task_id: str) -> AsyncGenerator[str, None]:
+        async for result in validate_extracted_data(task_id):
+            yield f"data: {json.dumps(result)}\n\n"
+            await asyncio.sleep(0.1)  # Small delay to simulate streaming
 
-        if status["status"] != "completed":
-            return {
-                "status": "pending",
-                "message": "Processing not completed yet"
-            }
-
-        result = validate_extracted_data(task_id)
-        
-        if result["status"] == "error":
-            return JSONResponse(
-                status_code=400,
-                content=result
-            )
-            
-        return JSONResponse(content=result)
-
-    except Exception as e:
-        print(f"Validation error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": f"Validation error: {str(e)}",
-                "error_details": traceback.format_exc()
-            }
-        )
+    return EventSourceResponse(
+        validation_results_generator(task_id),
+        media_type="text/event-stream"
+    )

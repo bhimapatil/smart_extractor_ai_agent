@@ -6,7 +6,7 @@ import zipfile
 from datetime import datetime
 from io import BytesIO
 from tkinter import Image
-from typing import Dict, Union, List, Any
+from typing import Dict, Union, List, Any, AsyncGenerator
 import pandas as pd
 from pandas import DataFrame
 from fastapi import HTTPException, UploadFile, File
@@ -19,6 +19,7 @@ from common_utilty.utility import ImageProcessor
 from config import settings
 import json
 from typing import Dict
+import asyncio  # Ensure asyncio is imported
 
 
 
@@ -306,79 +307,106 @@ def process_extracted_fields(results: List[Dict[str, Any]]) -> DataFrame:
 background_tasks: Dict[str, Dict] = {}
 
 def update_task_status(task_id: str, status: str, message: str = None, result: dict = None, validation_results: dict = None):
-    """Updated to include validation results"""
-    background_tasks[task_id] = {
-        "status": status,
-        "message": message,
-        "result": result,
-        "validation_results": validation_results,
-        "timestamp": datetime.now().isoformat()
-    }
+    """Updated to track processing updates"""
+    if task_id not in background_tasks:
+        background_tasks[task_id] = {
+            "status": status,
+            "message": message,
+            "result": result,
+            "validation_results": validation_results,
+            "timestamp": datetime.now().isoformat(),
+            "processing_updates": []  # List to store individual image processing updates
+        }
+    else:
+        background_tasks[task_id].update({
+            "status": status,
+            "message": message,
+            "result": result,
+            "validation_results": validation_results,
+            "timestamp": datetime.now().isoformat()
+        })
+
+def add_processing_update(task_id: str, update: dict):
+    """Add a new processing update for an image"""
+    if task_id in background_tasks:
+        if "processing_updates" not in background_tasks[task_id]:
+            background_tasks[task_id]["processing_updates"] = []
+        background_tasks[task_id]["processing_updates"].append(update)
 
 def get_task_status(task_id: str) -> dict:
     """Get the status of a background task"""
     return background_tasks.get(task_id, {"status": "not_found"})
 
-def process_images_in_background(task_id: str, folder_location: str, prompt: str):
-    """Modified to handle background processing with status updates and automatic validation"""
+async def process_images_in_background(task_id: str, folder_location: str, prompt: str):
+    """Modified to provide real-time updates for each processed image"""
     try:
         update_task_status(task_id, "processing", "Starting image processing...")
-        
+        processed_results = []
+
+        def process_callback(update):
+            """Callback to handle updates from image processor"""
+            add_processing_update(task_id, update)
+            if update.get("result"):
+                processed_results.append(update["result"])
+                # Process partial results
+                if len(processed_results) > 0:
+                    try:
+                        partial_df = process_extracted_fields(processed_results)
+                        result_data = {
+                            "rows_processed": len(partial_df),
+                            "columns": list(partial_df.columns),
+                            "preview": partial_df.head(5).to_dict(orient='records'),
+                            "is_partial": True
+                        }
+                        update_task_status(task_id, "processing", "Partial results available", result_data)
+                    except Exception as e:
+                        print(f"Error processing partial results: {str(e)}")
+
         processor = ImageProcessor(
             folder_paths=[folder_location],
             prompt_template=prompt,
-            max_workers=5
+            max_workers=5,
+            callback=process_callback
         )
-        results = processor.process_images()
+        
+        results = await asyncio.to_thread(processor.process_images)
         
         if results:
             df = process_extracted_fields(results)
-            print("Processed results shape:", df.shape)
             
-            # Clean up the images directory
-            output_dir = "images"
+            # Clean up images directory
             try:
-                for filename in os.listdir(output_dir):
-                    file_path = os.path.join(output_dir, filename)
+                for filename in os.listdir(folder_location):
+                    file_path = os.path.join(folder_location, filename)
                     if os.path.isfile(file_path):
                         os.remove(file_path)
-                print(f"Successfully cleaned up {output_dir} directory")
             except Exception as e:
-                print(f"Error cleaning up {output_dir} directory: {str(e)}")
+                print(f"Error cleaning up directory: {str(e)}")
             
-            result_data = {
+            final_result_data = {
                 "rows_processed": len(df),
                 "columns": list(df.columns),
-                "preview": df.head(5).to_dict(orient='records')
+                "preview": df.head(5).to_dict(orient='records'),
+                "is_partial": False
             }
-            update_task_status(task_id, "completed", "Processing completed successfully", result_data)
+            update_task_status(task_id, "completed", "Processing completed successfully", final_result_data)
             return df
-        else:
-            update_task_status(task_id, "completed", "No images processed")
-            return pd.DataFrame()
+            
+        update_task_status(task_id, "completed", "No images processed")
+        return pd.DataFrame()
             
     except Exception as e:
         error_msg = f"Error during processing: {str(e)}"
         update_task_status(task_id, "failed", error_msg)
         raise e
 
-
-
-
-
-
-
-
-
-
-
-
-def validate_extracted_data(task_id: str) -> Dict[str, Any]:
-    """Validates extracted data against master data. This is a synchronous function."""
+async def validate_extracted_data(task_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+    """Validates extracted data against master data and streams results invoice by invoice."""
     try:
         task_status = get_task_status(task_id)
         if task_status["status"] != "completed":
-            return {"status": "validation_pending", "message": "Waiting for processing to complete"}
+            yield {"status": "validation_pending", "message": "Waiting for processing to complete"}
+            return
         
         try:
             master_df = pd.read_csv("extracted_data_20250202_004225.csv")
@@ -389,7 +417,8 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                 'total': 'first'
             }).reset_index()
         except FileNotFoundError:
-            return {"status": "error", "message": "Master data file not found"}
+            yield {"status": "error", "message": "Master data file not found"}
+            return
 
         try:
             processed_df = pd.read_csv("extracted_data/processed_data.csv")
@@ -400,10 +429,12 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                 'total': 'first'
             }).reset_index()
         except FileNotFoundError:
-            return {"status": "error", "message": "Processed data file not found"}
+            yield {"status": "error", "message": "Processed data file not found"}
+            return
 
         if processed_grouped.empty:
-            return {"status": "error", "message": "Processed data is empty"}
+            yield {"status": "error", "message": "Processed data is empty"}
+            return
 
         validation_results = []
         
@@ -430,6 +461,7 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                     validation_record["is_valid"] = False
                     validation_record["discrepancies"].append("Invoice not found in master data")
                     validation_results.append(validation_record)
+                    yield validation_record
                     continue
 
                 master_row = master_row.iloc[0]
@@ -478,6 +510,7 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
                     validation_record["line_items"].append(item_validation)
 
                 validation_results.append(validation_record)
+                yield validation_record
             except Exception as e:
                 print(f"Error processing invoice {invoice_num}: {str(e)}")
                 continue
@@ -490,7 +523,7 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
             "invoices_with_discrepancies": len([r for r in validation_results if r["discrepancies"]])
         }
 
-        return {
+        yield {
             "status": "validation_completed",
             "summary": summary,
             "validation_results": validation_results
@@ -498,7 +531,7 @@ def validate_extracted_data(task_id: str) -> Dict[str, Any]:
 
     except Exception as e:
         print(f"Debug: Validation error occurred: {str(e)}")
-        return {
+        yield {
             "status": "validation_failed",
             "message": str(e),
             "error_details": traceback.format_exc()
@@ -515,10 +548,8 @@ def save_image(image_data: BytesIO) -> str:
         f.write(image_data.getvalue())
     return filename
 
-def extract_zip(file: UploadFile) -> list:
-    extracted_images = []
-    with zipfile.ZipFile(BytesIO(file.file.read())) as zip_ref:
-        for file_name in zip_ref.namelist():
-            if file_name.lower().endswith(('png', 'jpg', 'jpeg')):
-                saved_filename = save_image(BytesIO(zip_ref.read(file_name)))
-    return extracted_images
+def extract_zip(file_content: bytes) -> None:
+    output_dir = "images"
+    os.makedirs(output_dir, exist_ok=True)
+    with zipfile.ZipFile(BytesIO(file_content)) as zip_ref:
+        zip_ref.extractall(output_dir)
